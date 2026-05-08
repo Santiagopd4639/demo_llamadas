@@ -107,8 +107,10 @@ function App() {
       const dc = pc.createDataChannel("oai-events");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const audio = new Audio();
+      const promptAudio = new Audio();
 
       audio.autoplay = true;
+      promptAudio.preload = "auto";
       pc.ontrack = (event) => {
         audio.srcObject = event.streams[0];
       };
@@ -126,6 +128,7 @@ function App() {
       channelRef.current = dc;
       streamRef.current = stream;
       audioRef.current = audio;
+      promptAudioRef.current = promptAudio;
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -245,8 +248,12 @@ function App() {
     };
 
     const playFromUrl = (url) => {
-      const promptAudio = new Audio(url);
+      const promptAudio = promptAudioRef.current || new Audio();
       promptAudioRef.current = promptAudio;
+      promptAudio.pause();
+      promptAudio.currentTime = 0;
+      promptAudio.src = url;
+      promptAudio.load();
       promptAudio.onended = finishPrompt;
       promptAudio.onerror = finishPrompt;
       return promptAudio.play();
