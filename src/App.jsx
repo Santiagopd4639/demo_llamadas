@@ -406,18 +406,12 @@ function App() {
         ...current,
         availability: cleanFieldAnswer(text) || current.availability
       }));
-      leadStepRef.current = "email";
-      return agentPrompts.askEmail;
-    }
-
-    if (leadStepRef.current === "email") {
-      setLead((current) => ({
-        ...current,
-        email: extractEmail(text) || cleanFieldAnswer(text) || current.email
-      }));
       leadStepRef.current = "financing";
       return agentPrompts.askFinancing;
     }
+
+    // email step disabled
+    // if (leadStepRef.current === "email") { ... }
 
     if (leadStepRef.current === "financing") {
       setLead((current) => ({
@@ -498,7 +492,6 @@ function App() {
     "propertyType",
     "price",
     "availability",
-    "email",
     "financing"
   ];
   const progressPercent = callState === "scheduled"
@@ -612,7 +605,7 @@ function App() {
           <LeadRow label="Tipo propiedad" value={lead.propertyType} />
           <LeadRow label="Precio aprox." value={lead.price} />
           <LeadRow label="Disponibilidad" value={lead.availability} />
-          <LeadRow label="Email" value={lead.email} />
+          {/* <LeadRow label="Email" value={lead.email} /> */}
           <LeadRow label="Financiacion" value={lead.financing} />
           <LeadRow label="Estado" value={lead.status} strong />
 
@@ -628,7 +621,7 @@ function App() {
                 <SummaryItem label="Tipo" value={lead.propertyType} />
                 <SummaryItem label="Precio" value={lead.price} />
                 <SummaryItem label="Disponibilidad" value={lead.availability} />
-                <SummaryItem label="Email" value={lead.email} />
+                {/* <SummaryItem label="Email" value={lead.email} /> */}
                 <SummaryItem label="Financiacion" value={lead.financing} />
               </dl>
               <p>Proximo paso: Un agente humano recibira el aviso.</p>
