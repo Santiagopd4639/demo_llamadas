@@ -7,6 +7,10 @@
     {
       "source": "/tts",
       "destination": "/api/tts"
+    },
+    {
+      "source": "/extract",
+      "destination": "/api/extract"
     }
   ]
 }

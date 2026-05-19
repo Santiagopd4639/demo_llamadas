@@ -35,11 +35,7 @@ export default async function handler(req, res) {
     return res.status(400).send("Texto fuera del guion permitido");
   }
 
-  const cacheKey = JSON.stringify({
-    model: OPENAI_TTS_MODEL,
-    voice: OPENAI_TTS_VOICE,
-    input
-  });
+  const cacheKey = JSON.stringify({ model: OPENAI_TTS_MODEL, voice: OPENAI_TTS_VOICE, input });
   const cachedAudio = ttsCache.get(cacheKey);
   if (cachedAudio) {
     res.setHeader("Content-Type", "audio/mpeg");
@@ -80,26 +76,16 @@ export default async function handler(req, res) {
 }
 
 async function readJsonBody(req) {
-  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) {
-    return req.body;
-  }
-
+  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
   const text = await readTextBody(req);
   if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(text); } catch { return {}; }
 }
 
 async function readTextBody(req) {
   if (typeof req.body === "string") return req.body;
   if (Buffer.isBuffer(req.body)) return req.body.toString("utf8");
-
   const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.from(chunk));
-  }
+  for await (const chunk of req) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks).toString("utf8");
 }

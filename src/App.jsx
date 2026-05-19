@@ -30,6 +30,7 @@ const agentPrompts = {
   done:
     "De acuerdo tu asistencia ha sido completada se pondran en contacto contigo lo antes posible."
 };
+
 const agentPromptTexts = Object.values(agentPrompts);
 
 function App() {
@@ -52,6 +53,8 @@ function App() {
   const callRunIdRef = useRef(0);
   const callStateRef = useRef("esperando");
   const autoHangupRef = useRef(null);
+  const processingRef = useRef(false);
+  const retryCountRef = useRef({});
 
   const statusLabel = useMemo(() => {
     if (callState === "active") return "llamada activa";
@@ -332,91 +335,147 @@ function App() {
     }
   }
 
-  function requestNextAgentTurn(transcript = "") {
+  async function requestNextAgentTurn(transcript = "") {
     if (callStateRef.current !== "active") return;
-    if (awaitingResponseRef.current) {
+    if (awaitingResponseRef.current || processingRef.current) {
       pendingTranscriptRef.current = transcript || pendingTranscriptRef.current;
       pendingResponseRef.current = true;
       return;
     }
-    const prompt = getNextPrompt(transcript);
-    if (!prompt) return;
-    playAgentPrompt(prompt);
+    processingRef.current = true;
+    try {
+      const prompt = await getNextPrompt(transcript);
+      if (!prompt) return;
+      playAgentPrompt(prompt);
+    } catch (error) {
+      console.warn("Error extrayendo campo:", error);
+    } finally {
+      processingRef.current = false;
+    }
   }
 
-  function getNextPrompt(transcript) {
-    const text = transcript.trim();
-    if (!text) return null;
+  function repeatForStep(step) {
+    const map = {
+      operation: agentPrompts.greeting,
+      name: agentPrompts.askName,
+      phone: agentPrompts.repeatPhone,
+      zone: agentPrompts.askZone,
+      propertyType: agentPrompts.askPropertyType,
+      price: agentPrompts.askPrice,
+      availability: agentPrompts.askAvailability,
+      financing: agentPrompts.askFinancing
+    };
+    return map[step] || null;
+  }
 
-    if (leadStepRef.current === "operation") {
-      const operation = normalizeOperation(text);
-      setLead((current) => ({
-        ...current,
-        operation: operation || current.operation,
-        status: "llamada activa"
-      }));
+  function shouldRetry(step) {
+    const count = (retryCountRef.current[step] || 0) + 1;
+    retryCountRef.current[step] = count;
+    return count <= 2;
+  }
+
+  function resetRetries(step) {
+    retryCountRef.current[step] = 0;
+  }
+
+  async function getNextPrompt(transcript) {
+    const text = transcript.trim();
+    const step = leadStepRef.current;
+
+    if (isNoise(text)) return repeatForStep(step);
+
+    if (step === "operation") {
+      const val = await extractViaServer("operation", text);
+      const operation = normalizeOperation(val || text);
+      if (!operation) {
+        if (shouldRetry("operation")) return repeatForStep("operation");
+      }
+      resetRetries("operation");
+      setLead((c) => ({ ...c, operation: operation || c.operation, status: "llamada activa" }));
       leadStepRef.current = "name";
       return agentPrompts.askName;
     }
 
-    if (leadStepRef.current === "name") {
-      setLead((current) => ({ ...current, name: extractName(text) || text || current.name }));
+    if (step === "name") {
+      const val = await extractViaServer("name", text);
+      const name = val || extractName(text);
+      if (!isValidName(name)) {
+        if (shouldRetry("name")) return repeatForStep("name");
+      }
+      resetRetries("name");
+      setLead((c) => ({ ...c, name: name || text || c.name }));
       leadStepRef.current = "phone";
       return agentPrompts.askPhone;
     }
 
-    if (leadStepRef.current === "phone") {
-      const phone = normalizePhone(text);
+    if (step === "phone") {
+      const val = await extractViaServer("phone", text);
+      const rawDigits = (val || "").replace(/\D/g, "");
+      const phone = rawDigits.length === 9 ? formatPhone(rawDigits) : normalizePhone(text);
       if (phone.replace(/\D/g, "").length !== 9) {
         return agentPrompts.repeatPhone;
       }
-
-      setLead((current) => ({
-        ...current,
-        phone,
-        status: "llamada activa"
-      }));
+      resetRetries("phone");
+      setLead((c) => ({ ...c, phone, status: "llamada activa" }));
       leadStepRef.current = "zone";
       return agentPrompts.askZone;
     }
 
-    if (leadStepRef.current === "zone") {
-      setLead((current) => ({ ...current, zone: cleanFieldAnswer(text) || current.zone }));
+    if (step === "zone") {
+      const val = await extractViaServer("zone", text);
+      const zone = val || cleanFieldAnswer(text);
+      if (!isValidZone(zone)) {
+        if (shouldRetry("zone")) return repeatForStep("zone");
+      }
+      resetRetries("zone");
+      setLead((c) => ({ ...c, zone: zone || c.zone }));
       leadStepRef.current = "propertyType";
       return agentPrompts.askPropertyType;
     }
 
-    if (leadStepRef.current === "propertyType") {
-      setLead((current) => ({
-        ...current,
-        propertyType: cleanFieldAnswer(text) || current.propertyType
-      }));
+    if (step === "propertyType") {
+      const val = await extractViaServer("propertyType", text);
+      const pt = val || cleanFieldAnswer(text);
+      if (!isValidShortField(pt)) {
+        if (shouldRetry("propertyType")) return repeatForStep("propertyType");
+      }
+      resetRetries("propertyType");
+      setLead((c) => ({ ...c, propertyType: pt || c.propertyType }));
       leadStepRef.current = "price";
       return agentPrompts.askPrice;
     }
 
-    if (leadStepRef.current === "price") {
-      setLead((current) => ({ ...current, price: normalizePrice(text) || current.price }));
+    if (step === "price") {
+      const val = await extractViaServer("price", text);
+      const price = val || normalizePrice(text);
+      if (!isValidPrice(price)) {
+        if (shouldRetry("price")) return repeatForStep("price");
+      }
+      resetRetries("price");
+      setLead((c) => ({ ...c, price: price || c.price }));
       leadStepRef.current = "availability";
       return agentPrompts.askAvailability;
     }
 
-    if (leadStepRef.current === "availability") {
-      setLead((current) => ({
-        ...current,
-        availability: cleanFieldAnswer(text) || current.availability
-      }));
+    if (step === "availability") {
+      const val = await extractViaServer("availability", text);
+      const av = val || cleanFieldAnswer(text);
+      if (!isValidShortField(av)) {
+        if (shouldRetry("availability")) return repeatForStep("availability");
+      }
+      resetRetries("availability");
+      setLead((c) => ({ ...c, availability: av || c.availability }));
       leadStepRef.current = "financing";
       return agentPrompts.askFinancing;
     }
 
-    // email step disabled
-    // if (leadStepRef.current === "email") { ... }
-
-    if (leadStepRef.current === "financing") {
-      setLead((current) => ({
-        ...current,
-        financing: cleanFieldAnswer(text) || current.financing,
+    if (step === "financing") {
+      const val = await extractViaServer("financing", text);
+      const financing = val || normalizeFinancing(text) || cleanFieldAnswer(text);
+      resetRetries("financing");
+      setLead((c) => ({
+        ...c,
+        financing: financing || c.financing,
         status: "cita agendada"
       }));
       leadStepRef.current = "done";
@@ -424,6 +483,21 @@ function App() {
     }
 
     return null;
+  }
+
+  async function extractViaServer(field, transcript) {
+    try {
+      const response = await fetch("/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field, transcript })
+      });
+      if (!response.ok) return "";
+      const { value } = await response.json();
+      return value || "";
+    } catch {
+      return "";
+    }
   }
 
   function applyLeadUpdate(argsText) {
@@ -501,9 +575,12 @@ function App() {
   return (
     <main className="app-shell">
       <section className="topbar">
-        <div>
-          <p className="eyebrow">Inbound AI desk</p>
-          <h1>Demo agente IA inmobiliaria</h1>
+        <div className="topbar-brand">
+          <img src="/logo.jpeg" alt="Logo" className="topbar-logo" />
+          <div>
+            <p className="eyebrow">Inbound AI desk</p>
+            <h1>Demo agente IA inmobiliaria</h1>
+          </div>
         </div>
         <div className={`status-pill ${callState}`}>
           <span />
@@ -663,6 +740,64 @@ function getMessageLabel(role) {
   if (role === "agent") return "Agente IA";
   if (role === "system") return "Sistema";
   return "Cliente";
+}
+
+function isNoise(text) {
+  if (!text || text.length < 2) return true;
+  if (/^[\s.,!?¿¡\-–—…"'()\[\]]+$/.test(text)) return true;
+  if (text.length <= 3 && !/[a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9]/.test(text)) return true;
+  return false;
+}
+
+function isValidName(name) {
+  if (!name || name.trim().length < 2) return false;
+  if (!/[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/.test(name)) return false;
+  if (/\d/.test(name)) return false;
+  const noise = new Set(["si", "sí", "no", "pues", "bueno", "mira", "hola", "vale", "ok", "eh", "um", "ah", "ay", "bien"]);
+  if (noise.has(name.trim().toLowerCase())) return false;
+  if (isLLMErrorPhrase(name)) return false;
+  return true;
+}
+
+function isLLMErrorPhrase(text) {
+  if (!text) return false;
+  if (text.trim().length > 70) return true;
+  const lower = text.toLowerCase();
+  if (/^no (se |hay )/.test(lower)) return true;
+  if (/no (proporciona|menciona|especifica|indica|se puede|hay informac)/.test(lower)) return true;
+  if (/\b(el usuario no|no se recoge|no queda claro)\b/.test(lower)) return true;
+  return false;
+}
+
+function isValidZone(zone) {
+  if (!zone || zone.trim().length < 2) return false;
+  if (/^\d+$/.test(zone.trim())) return false;
+  if (!/[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/.test(zone)) return false;
+  if (isLLMErrorPhrase(zone)) return false;
+  return true;
+}
+
+function isValidShortField(val) {
+  if (!val || val.trim().length < 2) return false;
+  if (/^\d+$/.test(val.trim())) return false;
+  if (isLLMErrorPhrase(val)) return false;
+  return true;
+}
+
+function isValidPrice(price) {
+  if (!price || price.trim().length < 2) return false;
+  return /\d/.test(price) || /euro/i.test(price);
+}
+
+function normalizeFinancing(value = "") {
+  const lower = value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (/\bno\b/.test(lower) || /ya (tengo|cuento|dispongo|tenemos)/.test(lower) || /sin financ/.test(lower) || /al contado/.test(lower)) {
+    return "No";
+  }
+  if (/\bsi\b/.test(lower) || /necesi/.test(lower) || /con financ/.test(lower) || /me hace falta/.test(lower)) {
+    return "Sí";
+  }
+  return "";
 }
 
 function normalizeOperation(value = "") {

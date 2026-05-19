@@ -98,6 +98,20 @@ button:disabled, input:disabled {
   border-bottom: 1px solid var(--bd);
 }
 
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.topbar-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 4px 12px rgba(0, 80, 200, 0.35));
+}
+
 .eyebrow,
 .label {
   margin: 0 0 6px;
